@@ -14,6 +14,43 @@ import {
 
 export const recordsRouter = express.Router();
 
+function buildByYearTerm(curriculum, subjectScores) {
+  const scoreMap = new Map();
+  for (const s of subjectScores) {
+    const key = `${s.grade}-${s.term}`;
+    const arr = scoreMap.get(key) ?? [];
+    arr.push(s);
+    scoreMap.set(key, arr);
+  }
+
+  const curriculumMap = new Map();
+  for (const row of curriculum) {
+    const key = `${row.grade}-${row.term}`;
+    const arr = curriculumMap.get(key) ?? [];
+    arr.push(row);
+    curriculumMap.set(key, arr);
+  }
+
+  const keys = [...curriculumMap.keys()].sort((a, b) => {
+    const [ag, at] = a.split("-").map(Number);
+    const [bg, bt] = b.split("-").map(Number);
+    return (ag - bg) || (at - bt);
+  });
+
+  return keys.map((key) => {
+    const [grade, term] = key.split("-").map(Number);
+    const rows = curriculumMap.get(key) ?? [];
+    const scores = scoreMap.get(key) ?? [];
+    return {
+      grade,
+      term,
+      curriculum: rows,
+      subjectScores: scores,
+      subjectGroupScores: calculateSubjectGroupScores(scores),
+    };
+  });
+}
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: async (_req, _file, cb) => {
@@ -135,3 +172,29 @@ recordsRouter.get(
   }),
 );
 
+recordsRouter.get(
+  "/:recordId/analysis",
+  asyncHandler(async (req, res) => {
+    const { recordId } = req.params;
+    const rec = await getRecord(recordId);
+    if (!rec) throw httpError(404, "record not found");
+
+    const curriculum = rec.curriculum;
+    if (!curriculum) throw httpError(404, "curriculum not found (parse first)");
+
+    const subjectScores = calculateSubjectScores(curriculum);
+    const subjectGroupScores = calculateSubjectGroupScores(subjectScores);
+    const trends = calculateTrends(subjectScores);
+
+    return ok(res, {
+      recordId,
+      status: rec.status ?? null,
+      parseWarnings: Array.isArray(rec.parseWarnings) ? rec.parseWarnings : [],
+      byYearTerm: buildByYearTerm(curriculum, subjectScores),
+      curriculum,
+      subjectScores,
+      subjectGroupScores,
+      trends,
+    });
+  }),
+);

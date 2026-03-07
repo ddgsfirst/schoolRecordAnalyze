@@ -8,19 +8,11 @@ export function buildOpenApiSpec() {
         title: "Student Record Analysis API",
         version: "1.0.0",
         description:
-          "생기부(PDF)를 업로드하고 교과학습발달상황 데이터를 추출하여 점수/교과군/성장 분석을 제공하는 API",
+          "Upload student-record PDFs, parse curriculum rows, and return score analytics.",
       },
       servers: [{ url: "/" }],
       components: {
         schemas: {
-          ApiSuccess: {
-            type: "object",
-            properties: {
-              success: { type: "boolean", example: true },
-              data: {},
-            },
-            required: ["success", "data"],
-          },
           ApiError: {
             type: "object",
             properties: {
@@ -49,6 +41,7 @@ export function buildOpenApiSpec() {
                 required: ["recordId", "status"],
               },
             },
+            required: ["success", "data"],
           },
           ParseResponse: {
             type: "object",
@@ -62,14 +55,15 @@ export function buildOpenApiSpec() {
                 required: ["status"],
               },
             },
+            required: ["success", "data"],
           },
           CurriculumRow: {
             type: "object",
             properties: {
               grade: { type: "integer", example: 1 },
               term: { type: "integer", example: 1 },
-              subjectGroup: { type: "string", example: "수학" },
-              subject: { type: "string", example: "수학Ⅰ" },
+              subjectGroup: { type: "string", example: "Math" },
+              subject: { type: "string", example: "Math I" },
               credit: { type: "integer", example: 4 },
               rankGrade: { type: "integer", nullable: true, example: 2 },
               rank: { type: "integer", nullable: true, example: 15 },
@@ -82,8 +76,8 @@ export function buildOpenApiSpec() {
             properties: {
               grade: { type: "integer", example: 1 },
               term: { type: "integer", example: 1 },
-              subjectGroup: { type: "string", example: "수학" },
-              subject: { type: "string", example: "수학Ⅰ" },
+              subjectGroup: { type: "string", example: "Math" },
+              subject: { type: "string", example: "Math I" },
               credit: { type: "integer", example: 4 },
               rankGrade: { type: "integer", nullable: true, example: 2 },
               rank: { type: "integer", nullable: true, example: 15 },
@@ -97,7 +91,7 @@ export function buildOpenApiSpec() {
           SubjectGroupScore: {
             type: "object",
             properties: {
-              subjectGroup: { type: "string", example: "수학" },
+              subjectGroup: { type: "string", example: "Math" },
               groupScore: { type: "number", nullable: true, example: 89.7 },
             },
             required: ["subjectGroup", "groupScore"],
@@ -105,20 +99,62 @@ export function buildOpenApiSpec() {
           TrendRow: {
             type: "object",
             properties: {
-              subject: { type: "string", example: "수학Ⅰ" },
+              subject: { type: "string", example: "Math I" },
               previousPercentile: { type: "number", example: 82.1 },
               currentPercentile: { type: "number", example: 90.4 },
-              trend: { type: "string", enum: ["상승", "유지", "하락"], example: "상승" },
+              trend: { type: "string", example: "유지" },
             },
             required: ["subject", "previousPercentile", "currentPercentile", "trend"],
+          },
+          AnalysisResponse: {
+            type: "object",
+            properties: {
+              success: { type: "boolean", example: true },
+              data: {
+                type: "object",
+                properties: {
+                  recordId: { type: "string", example: "rec_001" },
+                  status: { type: "string", nullable: true, example: "parsed" },
+                  parseWarnings: { type: "array", items: { type: "string" } },
+                  byYearTerm: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        grade: { type: "integer", example: 1 },
+                        term: { type: "integer", example: 1 },
+                        curriculum: { type: "array", items: { $ref: "#/components/schemas/CurriculumRow" } },
+                        subjectScores: { type: "array", items: { $ref: "#/components/schemas/CalculateRow" } },
+                        subjectGroupScores: { type: "array", items: { $ref: "#/components/schemas/SubjectGroupScore" } },
+                      },
+                      required: ["grade", "term", "curriculum", "subjectScores", "subjectGroupScores"],
+                    },
+                  },
+                  curriculum: { type: "array", items: { $ref: "#/components/schemas/CurriculumRow" } },
+                  subjectScores: { type: "array", items: { $ref: "#/components/schemas/CalculateRow" } },
+                  subjectGroupScores: { type: "array", items: { $ref: "#/components/schemas/SubjectGroupScore" } },
+                  trends: { type: "array", items: { $ref: "#/components/schemas/TrendRow" } },
+                },
+                required: [
+                  "recordId",
+                  "status",
+                  "parseWarnings",
+                  "byYearTerm",
+                  "curriculum",
+                  "subjectScores",
+                  "subjectGroupScores",
+                  "trends",
+                ],
+              },
+            },
+            required: ["success", "data"],
           },
         },
       },
       paths: {
         "/api/v1/records": {
           post: {
-            summary: "생기부 업로드",
-            description: "생기부 파일(PDF 등)을 업로드하고 recordId를 생성합니다.",
+            summary: "Upload student record file",
             requestBody: {
               required: true,
               content: {
@@ -137,7 +173,11 @@ export function buildOpenApiSpec() {
             responses: {
               200: {
                 description: "OK",
-                content: { "application/json": { schema: { $ref: "#/components/schemas/UploadResponse" } } },
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/UploadResponse" },
+                  },
+                },
               },
               400: { description: "Bad Request", content: { "application/json": { schema: { $ref: "#/components/schemas/ApiError" } } } },
               500: { description: "Internal Server Error", content: { "application/json": { schema: { $ref: "#/components/schemas/ApiError" } } } },
@@ -146,19 +186,16 @@ export function buildOpenApiSpec() {
         },
         "/api/v1/records/{recordId}/parse": {
           post: {
-            summary: "교과학습발달상황 파싱",
-            parameters: [
-              {
-                name: "recordId",
-                in: "path",
-                required: true,
-                schema: { type: "string" },
-              },
-            ],
+            summary: "Parse curriculum from record file",
+            parameters: [{ name: "recordId", in: "path", required: true, schema: { type: "string" } }],
             responses: {
               200: {
                 description: "OK",
-                content: { "application/json": { schema: { $ref: "#/components/schemas/ParseResponse" } } },
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/ParseResponse" },
+                  },
+                },
               },
               400: { description: "Bad Request", content: { "application/json": { schema: { $ref: "#/components/schemas/ApiError" } } } },
               404: { description: "Not Found", content: { "application/json": { schema: { $ref: "#/components/schemas/ApiError" } } } },
@@ -168,10 +205,8 @@ export function buildOpenApiSpec() {
         },
         "/api/v1/records/{recordId}/curriculum": {
           get: {
-            summary: "교과 데이터 조회",
-            parameters: [
-              { name: "recordId", in: "path", required: true, schema: { type: "string" } },
-            ],
+            summary: "Get parsed curriculum rows",
+            parameters: [{ name: "recordId", in: "path", required: true, schema: { type: "string" } }],
             responses: {
               200: {
                 description: "OK",
@@ -195,10 +230,8 @@ export function buildOpenApiSpec() {
         },
         "/api/v1/records/{recordId}/calculate": {
           post: {
-            summary: "교과목 점수 계산",
-            parameters: [
-              { name: "recordId", in: "path", required: true, schema: { type: "string" } },
-            ],
+            summary: "Calculate subject scores",
+            parameters: [{ name: "recordId", in: "path", required: true, schema: { type: "string" } }],
             responses: {
               200: {
                 description: "OK",
@@ -222,10 +255,8 @@ export function buildOpenApiSpec() {
         },
         "/api/v1/records/{recordId}/subject-group": {
           get: {
-            summary: "교과군 단위 분석",
-            parameters: [
-              { name: "recordId", in: "path", required: true, schema: { type: "string" } },
-            ],
+            summary: "Calculate subject-group scores",
+            parameters: [{ name: "recordId", in: "path", required: true, schema: { type: "string" } }],
             responses: {
               200: {
                 description: "OK",
@@ -249,10 +280,8 @@ export function buildOpenApiSpec() {
         },
         "/api/v1/records/{recordId}/trend": {
           get: {
-            summary: "학기별 성장 분석",
-            parameters: [
-              { name: "recordId", in: "path", required: true, schema: { type: "string" } },
-            ],
+            summary: "Calculate term trend",
+            parameters: [{ name: "recordId", in: "path", required: true, schema: { type: "string" } }],
             responses: {
               200: {
                 description: "OK",
@@ -274,9 +303,28 @@ export function buildOpenApiSpec() {
             },
           },
         },
+        "/api/v1/records/{recordId}/analysis": {
+          get: {
+            summary: "Get consolidated analysis",
+            description:
+              "Returns curriculum, subject scores, subject-group scores, and trends in one response.",
+            parameters: [{ name: "recordId", in: "path", required: true, schema: { type: "string" } }],
+            responses: {
+              200: {
+                description: "OK",
+                content: {
+                  "application/json": {
+                    schema: { $ref: "#/components/schemas/AnalysisResponse" },
+                  },
+                },
+              },
+              404: { description: "Not Found", content: { "application/json": { schema: { $ref: "#/components/schemas/ApiError" } } } },
+              500: { description: "Internal Server Error", content: { "application/json": { schema: { $ref: "#/components/schemas/ApiError" } } } },
+            },
+          },
+        },
       },
     },
     apis: [],
   });
 }
-

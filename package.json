@@ -17,7 +17,6 @@
     "pdfjs-dist": "^5.5.207",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "tesseract.js": "^7.0.0",
-    "zod": "^3.25.76"
+    "tesseract.js": "^7.0.0"
   }
 }
