@@ -5,7 +5,7 @@ PDF 생기부를 업로드하고, **교과학습발달상황**에서 교과 성�
 ### 실행
 
 ```bash
-cd /c/Users/taehwan/Desktop/analyze
+
 npm install
 npm run dev
 ```
